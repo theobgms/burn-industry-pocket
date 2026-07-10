@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { usePocket } from '@/lib/usePocket';
+import Link from 'next/link';
 
 const C = { bg:'#0D0D0D', card:'#111', border:'#1e1e1e', gold:'#FFD60A', orange:'#ff6b35', red:'#D91F26', blue:'#7eb8f7', green:'#3ddc84', text:'#F2F2F2', muted:'#666', dim:'#2a2a2a', purple:'#c084fc' };
 const display = { fontFamily:"'Anton',sans-serif", letterSpacing:'0.02em', textTransform:'uppercase' as const };
@@ -16,6 +17,7 @@ const ROOMS = [
   { key:'shows',    label:'SHOWS',       sub:'Settle the night · Guarantees', color:C.red    },
   { key:'inbox',    label:'REVIEW',      sub:'Uncategorized transactions',    color:C.orange },
   { key:'owed',     label:"WHAT'S OWED", sub:'Receivables · Payables',        color:C.blue   },
+  { key:'import',   label:'IMPORT',      sub:'Upload a bank statement CSV',    color:C.purple, href:'/import' },
 ];
 
 let _ac: AudioContext|null = null;
@@ -92,16 +94,22 @@ export default function Pocket(){
       </div>
 
       <div style={{display:'grid',gap:10}}>
-        {ROOMS.map(r=>(
-          <button key={r.key} onClick={()=>{sfxOpen();setRoom(r.key);setScreen('room');}}
-            style={{...base,textAlign:'left',background:C.card,border:`1px solid ${C.border}`,borderLeft:`4px solid ${r.color}`,borderRadius:6,padding:'18px',cursor:'pointer',color:C.text,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        {ROOMS.map((r:any)=>{
+          const inner=(<>
             <div>
               <div style={{...display,fontSize:22,color:r.color,lineHeight:1}}>{r.label}</div>
               <div style={{...mono,fontSize:11,color:C.muted,marginTop:5}}>{r.sub}</div>
             </div>
             <span style={{...display,fontSize:24,color:C.dim}}>→</span>
-          </button>
-        ))}
+          </>);
+          const style={...base,textAlign:'left' as const,background:C.card,border:`1px solid ${C.border}`,borderLeft:`4px solid ${r.color}`,borderRadius:6,padding:'18px',cursor:'pointer',color:C.text,display:'flex',justifyContent:'space-between',alignItems:'center',textDecoration:'none'};
+          if(r.href) return(
+            <Link key={r.key} href={db.orgId?`${r.href}?org=${db.orgId}`:r.href} style={style}>{inner}</Link>
+          );
+          return(
+            <button key={r.key} onClick={()=>{sfxOpen();setRoom(r.key);setScreen('room');}} style={style}>{inner}</button>
+          );
+        })}
       </div>
       <button onClick={db.signOut} style={{...mono,marginTop:24,background:'transparent',border:'none',color:C.dim,fontSize:10,cursor:'pointer',letterSpacing:'0.2em'}}>SIGN OUT</button>
     </div>
@@ -127,13 +135,17 @@ export default function Pocket(){
                 style={{...mono,display:'block',width:'100%',textAlign:'left',background:db.orgId===o.id?'#0a0a0a':'transparent',border:`1px solid ${db.orgId===o.id?C.gold:C.border}`,borderRadius:4,padding:'10px 12px',marginBottom:6,cursor:'pointer',color:db.orgId===o.id?C.gold:C.muted,fontSize:11}}>{o.name}</button>
             ))}
             <div style={{...lbl,margin:'20px 0 12px'}}>JUMP TO</div>
-            {ROOMS.map(r=>(
-              <button key={r.key} onClick={()=>{sfxOpen();setRoom(r.key);setDrawer(false);}}
-                style={{...base,display:'block',width:'100%',textAlign:'left',background:room===r.key?'#0a0a0a':'transparent',border:`1px solid ${room===r.key?r.color:C.border}`,borderRadius:5,padding:'12px 14px',marginBottom:8,cursor:'pointer'}}>
+            {ROOMS.map((r:any)=>{
+              const st={...base,display:'block',width:'100%',textAlign:'left' as const,background:room===r.key?'#0a0a0a':'transparent',border:`1px solid ${room===r.key?r.color:C.border}`,borderRadius:5,padding:'12px 14px',marginBottom:8,cursor:'pointer',textDecoration:'none'};
+              const inner=(<>
                 <div style={{...display,fontSize:16,color:r.color}}>{r.label}</div>
                 <div style={{...mono,fontSize:10,color:C.muted,marginTop:2}}>{r.sub}</div>
-              </button>
-            ))}
+              </>);
+              if(r.href) return <Link key={r.key} href={db.orgId?`${r.href}?org=${db.orgId}`:r.href} style={st}>{inner}</Link>;
+              return(
+                <button key={r.key} onClick={()=>{sfxOpen();setRoom(r.key);setDrawer(false);}} style={st}>{inner}</button>
+              );
+            })}
             <button onClick={db.signOut} style={{...mono,marginTop:16,background:'transparent',border:'none',color:C.dim,fontSize:10,cursor:'pointer',letterSpacing:'0.2em',padding:0}}>SIGN OUT</button>
           </div>
         </div>
@@ -334,6 +346,7 @@ function ShowsRoom({db}:{db:any}){
 
 /* ═══════════════ REVIEW ═══════════════ */
 function InboxRoom({db}:{db:any}){
+  const importHref = db.orgId?`/import?org=${db.orgId}`:'/import';
   const queue = db.unreviewed;
   const [pick,setPick] = useState<Record<string,string>>({});
 
@@ -344,6 +357,9 @@ function InboxRoom({db}:{db:any}){
       <div style={{...mono,fontSize:11,color:C.muted,marginTop:5}}>
         {queue.length?'transactions waiting to be categorized':'Inbox zero. Books are clean.'}
       </div>
+      <Link href={importHref} style={{...mono,display:'block',marginTop:14,textAlign:'center',background:'transparent',border:`1px solid ${C.purple}`,borderRadius:3,color:C.purple,fontSize:10,letterSpacing:'0.2em',fontWeight:700,padding:'11px',textDecoration:'none'}}>
+        ⬆ IMPORT A STATEMENT
+      </Link>
     </div>
 
     {queue.length===0&&(
