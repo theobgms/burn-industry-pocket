@@ -1,166 +1,51 @@
-"use client";
+'use client';
+import { useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
-import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+const C={bg:'#0D0D0D',card:'#111',border:'#1e1e1e',gold:'#FFD60A',red:'#D91F26',text:'#F2F2F2',muted:'#666'};
+const display={fontFamily:"'Anton',sans-serif",textTransform:'uppercase' as const,letterSpacing:'0.02em'};
+const mono={fontFamily:"'Space Mono',monospace"};
 
-export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [message, setMessage] = useState("");
+export default function Login(){
+  const [email,setEmail]=useState('');
+  const [sent,setSent]=useState(false);
+  const [err,setErr]=useState('');
+  const [loading,setLoading]=useState(false);
 
-  async function sendLink() {
-    if (!email.trim()) return;
-    setStatus("sending");
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
+  async function send(){
+    if(!email.trim())return;
+    setLoading(true);setErr('');
+    const supabase=createClient();
+    const {error}=await supabase.auth.signInWithOtp({
+      email:email.trim(),
+      options:{emailRedirectTo:`${window.location.origin}/auth/callback`}
     });
-    if (error) {
-      setStatus("error");
-      setMessage(error.message);
-    } else {
-      setStatus("sent");
-    }
+    setLoading(false);
+    if(error)setErr(error.message); else setSent(true);
   }
 
-  return (
-    <main style={styles.page}>
-      <div style={styles.card}>
-        <div style={styles.wordmark}>Burn Industry Pocket</div>
-        <div style={styles.rule} />
-        <p style={styles.sub}>Double-entry books for Burn Industry Inc. &amp; The OBGMs Inc.</p>
-
-        {status === "sent" ? (
-          <div style={styles.sentBox}>
-            <div style={styles.sentTitle}>Check your email</div>
-            <div style={styles.sentBody}>
-              A sign-in link is on its way to <strong>{email}</strong>. Open it on this device.
-            </div>
+  return(
+    <div style={{minHeight:'100vh',background:C.bg,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{width:'100%',maxWidth:380}}>
+        <div style={{...mono,fontSize:9,letterSpacing:'0.45em',color:C.muted,marginBottom:10}}>BURN INDUSTRY</div>
+        <div style={{...display,fontSize:'clamp(38px,11vw,60px)',lineHeight:0.92,color:C.text}}>POCKET</div>
+        <div style={{...mono,fontSize:12,color:C.muted,marginTop:12,marginBottom:32,lineHeight:1.7}}>Every dollar accounted for. Sign in to continue.</div>
+        {!sent?(<>
+          <input value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')send();}}
+            type="email" placeholder="you@burnindustry.com"
+            style={{...mono,width:'100%',background:'#0a0a0a',border:`1px solid ${C.border}`,borderRadius:3,padding:'13px 14px',fontSize:13,color:C.text,marginBottom:10}}/>
+          <button onClick={send} disabled={loading}
+            style={{...mono,width:'100%',background:loading?C.border:C.gold,border:'none',borderRadius:3,color:loading?C.muted:'#0D0D0D',fontSize:11,letterSpacing:'0.25em',fontWeight:700,padding:'14px',cursor:loading?'wait':'pointer'}}>
+            {loading?'SENDING…':'SEND MAGIC LINK'}
+          </button>
+          {err&&<div style={{...mono,fontSize:11,color:C.red,marginTop:12}}>{err}</div>}
+        </>):(
+          <div style={{background:C.card,border:`1px solid ${C.gold}`,borderRadius:4,padding:20}}>
+            <div style={{...mono,fontSize:10,letterSpacing:'0.2em',color:C.gold,fontWeight:700,marginBottom:8}}>CHECK YOUR EMAIL</div>
+            <div style={{...mono,fontSize:12,color:C.muted,lineHeight:1.7}}>A sign-in link is on its way to {email}.</div>
           </div>
-        ) : (
-          <>
-            <label style={styles.label}>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendLink()}
-              placeholder="denz@burnindustry.com"
-              style={styles.input}
-              autoFocus
-            />
-            <button
-              onClick={sendLink}
-              disabled={status === "sending"}
-              style={{ ...styles.button, opacity: status === "sending" ? 0.6 : 1 }}
-            >
-              {status === "sending" ? "Sending…" : "Send sign-in link"}
-            </button>
-            {status === "error" && <div style={styles.error}>{message}</div>}
-          </>
         )}
       </div>
-    </main>
+    </div>
   );
 }
-
-const ink = "#14110c";
-const brass = "#b08422";
-const cream = "#f4efe4";
-
-const styles: Record<string, React.CSSProperties> = {
-  page: {
-    minHeight: "100vh",
-    background: ink,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "1.5rem",
-    fontFamily: "ui-serif, Georgia, 'Times New Roman', serif",
-  },
-  card: {
-    width: "100%",
-    maxWidth: 400,
-    background: cream,
-    border: `1px solid ${brass}`,
-    borderRadius: 4,
-    padding: "2.5rem",
-  },
-  wordmark: {
-    fontSize: 26,
-    fontWeight: 600,
-    color: ink,
-    letterSpacing: "-0.01em",
-  },
-  rule: {
-    height: 1,
-    background: brass,
-    margin: "1rem 0 1.25rem",
-    opacity: 0.5,
-  },
-  sub: {
-    fontSize: 14,
-    color: "#5b5344",
-    margin: "0 0 1.75rem",
-    lineHeight: 1.5,
-  },
-  label: {
-    display: "block",
-    fontSize: 11,
-    letterSpacing: "0.1em",
-    textTransform: "uppercase",
-    color: "#7a6f59",
-    marginBottom: 6,
-    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
-  },
-  input: {
-    width: "100%",
-    boxSizing: "border-box",
-    padding: "11px 12px",
-    fontSize: 15,
-    border: `1px solid #cdbf9e`,
-    borderRadius: 3,
-    background: "#fdfbf6",
-    color: ink,
-    outline: "none",
-    marginBottom: 16,
-    fontFamily: "ui-serif, Georgia, serif",
-  },
-  button: {
-    width: "100%",
-    padding: "12px",
-    fontSize: 14,
-    fontWeight: 600,
-    color: cream,
-    background: ink,
-    border: `1px solid ${ink}`,
-    borderRadius: 3,
-    cursor: "pointer",
-    letterSpacing: "0.02em",
-  },
-  error: {
-    marginTop: 12,
-    fontSize: 13,
-    color: "#8a2a2a",
-  },
-  sentBox: {
-    padding: "1rem",
-    background: "#fdfbf6",
-    border: `1px solid #cdbf9e`,
-    borderRadius: 3,
-  },
-  sentTitle: {
-    fontSize: 16,
-    fontWeight: 600,
-    color: ink,
-    marginBottom: 6,
-  },
-  sentBody: {
-    fontSize: 14,
-    color: "#5b5344",
-    lineHeight: 1.5,
-  },
-};
