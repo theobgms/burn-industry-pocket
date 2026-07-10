@@ -15,6 +15,7 @@ export function usePocket() {
   const [receivables, setReceivables] = useState<any[]>([]);
   const [payables, setPayables] = useState<any[]>([]);
   const [lines, setLines] = useState<any[]>([]);
+  const [rules, setRules] = useState<any[]>([]);
 
   // Bootstrap: user + orgs
   useEffect(() => {
@@ -39,7 +40,7 @@ export function usePocket() {
     if (!orgId) return;
     const [
       { data: acc }, { data: sh }, { data: rt },
-      { data: rec }, { data: pay }, { data: je },
+      { data: rec }, { data: pay }, { data: je }, { data: rl },
     ] = await Promise.all([
       supabase.from('chart_of_accounts').select('*').eq('org_id', orgId).eq('is_active', true).order('code'),
       supabase.from('shows').select('*').eq('org_id', orgId).order('date', { ascending: false }),
@@ -47,6 +48,7 @@ export function usePocket() {
       supabase.from('receivables').select('*').eq('org_id', orgId).order('due_date'),
       supabase.from('payables').select('*').eq('org_id', orgId).order('due_date'),
       supabase.from('journal_entries').select('id, date, description, journal_lines(account_id, debit, credit)').eq('org_id', orgId).order('date', { ascending: false }).limit(500),
+      supabase.from('categorization_rules').select('*').eq('org_id', orgId),
     ]);
 
     setAccounts(acc||[]);
@@ -54,6 +56,7 @@ export function usePocket() {
     setTxns(rt||[]);
     setReceivables(rec||[]);
     setPayables(pay||[]);
+    setRules(rl||[]);
 
     const showIds = (sh||[]).map((s:any)=>s.id);
     if (showIds.length) {
@@ -99,6 +102,8 @@ export function usePocket() {
     .reduce((s,p)=>s+(Number(p.amount_expected||p.amount||0)-Number(p.amount_paid||0)),0);
 
   const unreviewed = txns.filter(t=>t.status==='unreviewed');
+  const categorized = txns.filter(t=>t.status==='categorized');
+  const posted = txns.filter(t=>t.status==='posted');
 
   // ---- Mutations ----
   const addShow = useCallback(async (show: any) => {
@@ -113,10 +118,59 @@ export function usePocket() {
     refresh();
   }, [refresh]);
 
-  const categorizeTxn = useCallback(async (txnId: string, accountId: string) => {
-    await supabase.from('raw_transactions').update({ account_id: accountId, status: 'categorized' }).eq('id', txnId);
+  // Categorize: store the chosen account in category_account_id (NOT account_id,
+  // which is the bank account and forms the other half of the double entry).
+  const categorizeTxn = useCallback(async (txnId: string, accountId: string, learn = true) => {
+    if (!orgId) return;
+    await supabase.from('raw_transactions')
+      .update({ category_account_id: accountId, status: 'categorized' })
+      .eq('id', txnId);
+
+    if (learn) {
+      const txn = txns.find((t:any)=>t.id===txnId);
+      const pattern = txn?.normalized_vendor;
+      if (pattern) await supabase.rpc('learn_rule', { p_org: orgId, p_pattern: pattern, p_account: accountId });
+    }
+    refresh();
+  }, [orgId, txns, refresh]);
+
+  // Post a single categorized txn to the ledger as a balanced journal entry.
+  const postTxn = useCallback(async (txnId: string) => {
+    const { error } = await supabase.rpc('post_transaction', { p_txn: txnId });
+    refresh();
+    return error?.message ?? null;
+  }, [refresh]);
+
+  // Post every categorized txn in an import.
+  const postImport = useCallback(async (importId: string) => {
+    const { data, error } = await supabase.rpc('post_import', { p_import: importId });
+    refresh();
+    return { count: data as number|null, error: error?.message ?? null };
+  }, [refresh]);
+
+  // Categorize + post in one move.
+  const categorizeAndPost = useCallback(async (txnId: string, accountId: string) => {
+    await categorizeTxn(txnId, accountId);
+    const { error } = await supabase.rpc('post_transaction', { p_txn: txnId });
+    refresh();
+    return error?.message ?? null;
+  }, [categorizeTxn, refresh]);
+
+  const unpostTxn = useCallback(async (txnId: string) => {
+    await supabase.rpc('unpost_transaction', { p_txn: txnId });
     refresh();
   }, [refresh]);
+
+  // Suggest an account for a txn from learned rules.
+  const suggestFor = useCallback((txn: any) => {
+    if (txn.category_account_id) return txn.category_account_id;
+    const v = txn.normalized_vendor;
+    if (!v) return null;
+    const exact = rules.find((r:any)=>r.match_pattern === v);
+    if (exact) return exact.account_id;
+    const partial = rules.find((r:any)=>v.includes(r.match_pattern) || r.match_pattern.includes(v));
+    return partial ? partial.account_id : (txn.suggested_account_id ?? null);
+  }, [rules]);
 
   const ignoreTxn = useCallback(async (txnId: string) => {
     await supabase.from('raw_transactions').update({ status: 'ignored' }).eq('id', txnId);
@@ -142,8 +196,10 @@ export function usePocket() {
   return {
     userId, loaded, orgs, orgId, setOrgId, refresh, signOut,
     accounts, shows, settlements, txns, receivables, payables,
-    income, cogs, expense, netProfit, cashOnHand, arOpen, apOpen, unreviewed,
-    balanceOf, accountsByType,
-    addShow, settleShow, categorizeTxn, ignoreTxn, addReceivable, markReceived,
+    income, cogs, expense, netProfit, cashOnHand, arOpen, apOpen,
+    unreviewed, categorized, posted, rules,
+    balanceOf, accountsByType, suggestFor,
+    addShow, settleShow, addReceivable, markReceived,
+    categorizeTxn, categorizeAndPost, postTxn, postImport, unpostTxn, ignoreTxn,
   };
 }

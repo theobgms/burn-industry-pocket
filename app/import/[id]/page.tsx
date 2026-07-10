@@ -1,117 +1,111 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import PostPanel from "./post-panel";
 
 export const dynamic = "force-dynamic";
 
-const ink = "#14110c";
-const brass = "#b08422";
-const cream = "#f4efe4";
+const C = { bg:'#0D0D0D', card:'#111', border:'#1e1e1e', gold:'#FFD60A', orange:'#ff6b35', red:'#D91F26', green:'#3ddc84', text:'#F2F2F2', muted:'#666', dim:'#2a2a2a', purple:'#c084fc' };
+const display = { fontFamily:"'Anton',sans-serif", letterSpacing:'0.02em', textTransform:'uppercase' as const };
+const mono = { fontFamily:"'Space Mono',monospace" };
 
-function fmt(n: number) {
-  return n.toLocaleString("en-CA", { style: "currency", currency: "CAD" });
-}
+const money = (n:number)=>`$${Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+const money0 = (n:number)=>`$${Math.round(Number(n||0)).toLocaleString('en-US')}`;
 
 export default async function ImportReviewPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<{ org?: string }>;
-}) {
+  params, searchParams,
+}: { params: Promise<{ id: string }>; searchParams: Promise<{ org?: string }> }) {
   const { id } = await params;
   const { org: orgId } = await searchParams;
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  if (!orgId) redirect("/select-org");
+  if (!orgId) redirect("/");
 
   const { data: imp } = await supabase
     .from("statement_imports")
     .select("id, file_name, period_start, period_end, status")
-    .eq("id", id)
-    .single();
+    .eq("id", id).single();
   if (!imp) redirect(`/import?org=${orgId}`);
 
   const { data: txns } = await supabase
     .from("raw_transactions")
-    .select("id, date, description, amount, status")
-    .eq("statement_import_id", id)
-    .order("date");
+    .select("id, date, description, normalized_vendor, amount, status, category_account_id")
+    .eq("statement_import_id", id).order("date");
 
   const rows = txns ?? [];
-  const moneyIn = rows.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
-  const moneyOut = rows.filter((t) => Number(t.amount) < 0).reduce((s, t) => s + Number(t.amount), 0);
+  const moneyIn  = rows.filter(t => Number(t.amount) > 0).reduce((s,t)=>s+Number(t.amount),0);
+  const moneyOut = rows.filter(t => Number(t.amount) < 0).reduce((s,t)=>s+Number(t.amount),0);
+
+  const unreviewed  = rows.filter(t=>t.status==='unreviewed').length;
+  const categorized = rows.filter(t=>t.status==='categorized').length;
+  const posted      = rows.filter(t=>t.status==='posted').length;
 
   return (
-    <main style={{ minHeight: "100vh", background: ink, fontFamily: "ui-serif, Georgia, serif" }}>
-      <div style={{ maxWidth: 900, margin: "0 auto", padding: "2.5rem 1.5rem" }}>
-        <Link href={`/import?org=${orgId}`} style={{ color: brass, fontSize: 12, textDecoration: "none", fontFamily: "ui-monospace, monospace" }}>
-          ← imports
-        </Link>
-        <div style={{ fontSize: 24, fontWeight: 600, color: cream, marginTop: 6 }}>{imp.file_name}</div>
-        <div style={{ color: "#8a7d61", fontSize: 13, fontFamily: "ui-monospace, monospace", marginTop: 2 }}>
-          {imp.period_start} → {imp.period_end} · {rows.length} transactions
+    <main style={{ minHeight:"100vh", background:C.bg, color:C.text, ...mono }}>
+      <div style={{ display:'flex', alignItems:'center', gap:12, padding:'16px 18px', borderBottom:`1px solid ${C.border}` }}>
+        <Link href={`/import?org=${orgId}`} style={{ ...mono, color:C.muted, fontSize:18, textDecoration:"none" }}>←</Link>
+        <div style={{ ...display, fontSize:20, color:C.orange, lineHeight:1 }}>{imp.file_name}</div>
+      </div>
+
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px 20px 60px" }}>
+        <div style={{ ...mono, color:C.muted, fontSize:11, marginBottom:14, letterSpacing:'0.1em' }}>
+          {imp.period_start} → {imp.period_end} · {rows.length} TRANSACTIONS · {String(imp.status).replace('_',' ').toUpperCase()}
         </div>
 
-        <div style={{ display: "flex", gap: 12, margin: "1.5rem 0" }}>
-          <div style={statBox}>
-            <div style={statLabel}>Money in</div>
-            <div style={{ ...statVal, color: "#2f6b3a" }}>{fmt(moneyIn)}</div>
-          </div>
-          <div style={statBox}>
-            <div style={statLabel}>Money out</div>
-            <div style={{ ...statVal, color: "#8a2a2a" }}>{fmt(Math.abs(moneyOut))}</div>
-          </div>
+        <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+          <Stat label="MONEY IN"  value={money0(moneyIn)}            color={C.green} />
+          <Stat label="MONEY OUT" value={money0(Math.abs(moneyOut))} color={C.red} />
         </div>
 
-        <div style={{ background: cream, border: `1px solid ${brass}`, borderRadius: 4, overflow: "hidden" }}>
+        <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+          <Stat label="TO REVIEW" value={String(unreviewed)}  color={unreviewed?C.orange:C.muted} />
+          <Stat label="STAGED"    value={String(categorized)} color={categorized?C.gold:C.muted} />
+          <Stat label="POSTED"    value={String(posted)}      color={posted?C.green:C.muted} />
+        </div>
+
+        <PostPanel importId={id} orgId={orgId} categorized={categorized} unreviewed={unreviewed} />
+
+        <div style={{ ...mono, fontSize:9, letterSpacing:"0.35em", color:C.muted, margin:"28px 0 12px" }}>PARSED ROWS</div>
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:4, overflow:"hidden" }}>
           {rows.map((t, i) => (
-            <div
-              key={t.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "90px 1fr 110px",
-                gap: 10,
-                padding: "10px 14px",
-                borderTop: i === 0 ? "none" : "1px solid #e8dfc9",
-                fontSize: 13,
-                alignItems: "center",
-              }}
-            >
-              <span style={{ color: "#8a7d61", fontFamily: "ui-monospace, monospace", fontSize: 12 }}>{t.date}</span>
-              <span style={{ color: ink }}>{t.description}</span>
-              <span style={{ color: Number(t.amount) < 0 ? "#8a2a2a" : "#2f6b3a", textAlign: "right", fontFamily: "ui-monospace, monospace" }}>
-                {fmt(Number(t.amount))}
+            <div key={t.id} style={{
+              display:"grid", gridTemplateColumns:"78px 1fr 100px 70px", gap:10,
+              padding:"11px 14px", borderTop: i===0 ? "none" : `1px solid ${C.border}`,
+              fontSize:12, alignItems:"center",
+            }}>
+              <span style={{ ...mono, color:C.dim, fontSize:11 }}>{t.date}</span>
+              <span style={{ ...mono, color:C.text, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                {t.normalized_vendor || t.description}
+              </span>
+              <span style={{ ...mono, color: Number(t.amount)<0 ? C.red : C.green, textAlign:"right" }}>
+                {money(Number(t.amount))}
+              </span>
+              <span style={{ ...mono, fontSize:8, letterSpacing:'0.1em', textAlign:'right', color: statusColor(t.status), fontWeight:700 }}>
+                {String(t.status).toUpperCase()}
               </span>
             </div>
           ))}
-          {rows.length === 0 && <div style={{ padding: "1.5rem", color: "#8a7d61", fontSize: 14 }}>No transactions in this import.</div>}
-        </div>
-
-        <div style={{ marginTop: 20, padding: "1rem 1.25rem", background: "#1c1810", border: `1px solid ${brass}`, borderRadius: 4, color: "#c9bda0", fontSize: 13, lineHeight: 1.6 }}>
-          <strong style={{ color: brass }}>Next:</strong> categorization + posting to the ledger is the next build. This screen confirms your statement parsed correctly — check the dates and amounts look right.
+          {rows.length === 0 && <div style={{ padding:"20px", ...mono, color:C.dim, fontSize:12 }}>No transactions in this import.</div>}
         </div>
       </div>
     </main>
   );
 }
 
-const statBox: React.CSSProperties = {
-  flex: 1,
-  background: cream,
-  border: `1px solid ${brass}`,
-  borderRadius: 4,
-  padding: "0.9rem 1.1rem",
-};
-const statLabel: React.CSSProperties = {
-  fontSize: 10,
-  letterSpacing: "0.12em",
-  textTransform: "uppercase",
-  color: "#8a7d61",
-  fontFamily: "ui-monospace, monospace",
-};
-const statVal: React.CSSProperties = { fontSize: 20, fontWeight: 600, marginTop: 4 };
+function Stat({label,value,color}:{label:string;value:string;color:string}) {
+  return (
+    <div style={{ flex:1, background:C.card, border:`1px solid ${C.border}`, borderRadius:3, padding:"10px 12px" }}>
+      <div style={{ ...mono, fontSize:9, letterSpacing:'0.3em', color:C.muted, marginBottom:4 }}>{label}</div>
+      <div style={{ ...display, fontSize:20, color }}>{value}</div>
+    </div>
+  );
+}
+
+function statusColor(s: string): string {
+  if (s === 'posted') return C.green;
+  if (s === 'categorized') return C.gold;
+  if (s === 'ignored') return C.dim;
+  return C.orange;
+}

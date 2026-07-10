@@ -348,30 +348,79 @@ function ShowsRoom({db}:{db:any}){
 function InboxRoom({db}:{db:any}){
   const importHref = db.orgId?`/import?org=${db.orgId}`:'/import';
   const queue = db.unreviewed;
+  const staged = db.categorized;
   const [pick,setPick] = useState<Record<string,string>>({});
+  const [busy,setBusy] = useState(false);
+  const [err,setErr]   = useState('');
+
+  const acctName=(id:string)=>{const a=db.accounts.find((x:any)=>x.id===id);return a?`${a.code} — ${a.name}`:'';};
+  const stagedTotal = staged.reduce((n:number,t:any)=>n+Math.abs(Number(t.amount)),0);
+
+  async function postAll(){
+    setBusy(true);setErr('');
+    for(const t of staged){
+      const e = await db.postTxn(t.id);
+      if(e){setErr(e);break;}
+    }
+    setBusy(false);
+    if(!err) sfxCash();
+  }
 
   return(<>
     <div style={{...card,borderLeft:`3px solid ${C.orange}`}}>
       <div style={{...lbl,color:C.orange}}>REVIEW QUEUE</div>
       <div style={{...display,fontSize:32,color:queue.length?C.orange:C.green,lineHeight:1}}>{queue.length}</div>
       <div style={{...mono,fontSize:11,color:C.muted,marginTop:5}}>
-        {queue.length?'transactions waiting to be categorized':'Inbox zero. Books are clean.'}
+        {queue.length?'transactions waiting to be categorized':'Nothing left to categorize.'}
+      </div>
+      <div style={{...mono,fontSize:10,color:C.dim,marginTop:8,letterSpacing:'0.1em'}}>
+        {staged.length} STAGED · {db.posted.length} POSTED TO LEDGER
       </div>
       <Link href={importHref} style={{...mono,display:'block',marginTop:14,textAlign:'center',background:'transparent',border:`1px solid ${C.purple}`,borderRadius:3,color:C.purple,fontSize:10,letterSpacing:'0.2em',fontWeight:700,padding:'11px',textDecoration:'none'}}>
         ⬆ IMPORT A STATEMENT
       </Link>
     </div>
 
-    {queue.length===0&&(
+    {/* STAGED — ready to post */}
+    {staged.length>0&&(
+      <div style={{...card,borderLeft:`3px solid ${C.gold}`,background:'#12100a'}}>
+        <div style={{...lbl,color:C.gold}}>STAGED FOR THE LEDGER</div>
+        <div style={{...mono,fontSize:11,color:C.muted,lineHeight:1.6,marginBottom:12}}>
+          Categorized but not yet posted. Posting writes a balanced double-entry and moves your P&L.
+        </div>
+        {staged.slice(0,8).map((t:any)=>(
+          <div key={t.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,padding:'8px 0',borderBottom:`1px solid ${C.border}`}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{...mono,fontSize:12,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{t.normalized_vendor||t.description}</div>
+              <div style={{...mono,fontSize:9,color:C.gold,marginTop:3,letterSpacing:'0.1em'}}>→ {acctName(t.category_account_id)}</div>
+            </div>
+            <div style={{...mono,fontSize:12,color:Number(t.amount)<0?C.red:C.green,whiteSpace:'nowrap'}}>{money(t.amount)}</div>
+            <button onClick={()=>{sfxTap();db.categorizeTxn(t.id,'',false);}} title="Send back to review"
+              style={{...mono,background:'transparent',border:'none',color:C.dim,fontSize:14,cursor:'pointer',padding:0}}>↩</button>
+          </div>
+        ))}
+        {staged.length>8&&<div style={{...mono,fontSize:10,color:C.dim,marginTop:8}}>+{staged.length-8} more</div>}
+
+        <button onClick={postAll} disabled={busy}
+          style={{...mono,width:'100%',marginTop:14,background:busy?C.dim:C.gold,border:'none',borderRadius:3,color:busy?C.muted:'#0D0D0D',fontSize:10,letterSpacing:'0.2em',fontWeight:700,padding:'13px',cursor:busy?'wait':'pointer'}}>
+          {busy?'POSTING…':`✓ POST ${staged.length} TO THE LEDGER — ${money0(stagedTotal)}`}
+        </button>
+        {err&&<div style={{...mono,fontSize:11,color:C.red,marginTop:10,lineHeight:1.6}}>{err}</div>}
+      </div>
+    )}
+
+    {queue.length===0&&staged.length===0&&(
       <div style={{...card,textAlign:'center',borderColor:C.green,background:'#0a1005'}}>
         <div style={{...pixel,fontSize:12,color:C.green,marginBottom:10}}>ALL CLEAR</div>
-        <div style={{...mono,fontSize:11,color:C.muted}}>Nothing to review. Import a statement to bring more in.</div>
+        <div style={{...mono,fontSize:11,color:C.muted}}>Books are clean. Every transaction is on the ledger.</div>
       </div>
     )}
 
     {queue.map((t:any)=>{
-      const suggested = t.suggested_account_id ? db.accounts.find((a:any)=>a.id===t.suggested_account_id) : null;
-      const chosen = pick[t.id] || t.suggested_account_id || '';
+      const suggestedId = db.suggestFor(t);
+      const suggested = suggestedId ? db.accounts.find((a:any)=>a.id===suggestedId) : null;
+      const chosen = pick[t.id] ?? (suggestedId || '');
+      const learned = suggested && db.rules.some((r:any)=>r.account_id===suggestedId && t.normalized_vendor?.includes(r.match_pattern));
       return(
         <div key={t.id} style={{...card,borderLeft:`3px solid ${C.orange}`}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,marginBottom:12}}>
@@ -384,7 +433,8 @@ function InboxRoom({db}:{db:any}){
 
           {suggested&&(
             <div style={{...mono,fontSize:10,color:C.purple,marginBottom:8,letterSpacing:'0.1em'}}>
-              SUGGESTED: {suggested.name}{t.suggested_confidence?` · ${Math.round(t.suggested_confidence*100)}% SURE`:''}
+              {learned?'LEARNED':'SUGGESTED'}: {suggested.name}
+              {t.suggested_confidence?` · ${Math.round(t.suggested_confidence*100)}% SURE`:''}
             </div>
           )}
 
@@ -395,10 +445,12 @@ function InboxRoom({db}:{db:any}){
           </select>
 
           <div style={{display:'flex',gap:8}}>
-            <button disabled={!chosen} onClick={()=>{sfxCash();db.categorizeTxn(t.id,chosen);}}
-              style={{...mono,flex:1,background:chosen?C.orange:C.dim,border:'none',borderRadius:3,color:chosen?'#0D0D0D':C.muted,fontSize:10,letterSpacing:'0.2em',fontWeight:700,padding:'11px',cursor:chosen?'pointer':'not-allowed'}}>CATEGORIZE</button>
+            <button disabled={!chosen} onClick={()=>{sfxTap();db.categorizeTxn(t.id,chosen);}}
+              style={{...mono,flex:1,background:chosen?'transparent':C.dim,border:`1px solid ${chosen?C.orange:C.dim}`,borderRadius:3,color:chosen?C.orange:C.muted,fontSize:10,letterSpacing:'0.15em',fontWeight:700,padding:'11px',cursor:chosen?'pointer':'not-allowed'}}>STAGE</button>
+            <button disabled={!chosen} onClick={async()=>{sfxCash();const e=await db.categorizeAndPost(t.id,chosen);if(e)setErr(e);}}
+              style={{...mono,flex:1,background:chosen?C.orange:C.dim,border:'none',borderRadius:3,color:chosen?'#0D0D0D':C.muted,fontSize:10,letterSpacing:'0.15em',fontWeight:700,padding:'11px',cursor:chosen?'pointer':'not-allowed'}}>POST NOW</button>
             <button onClick={()=>{sfxTap();db.ignoreTxn(t.id);}}
-              style={{...mono,background:'transparent',border:`1px solid ${C.border}`,borderRadius:3,color:C.muted,fontSize:9,letterSpacing:'0.1em',padding:'11px 14px',cursor:'pointer'}}>IGNORE</button>
+              style={{...mono,background:'transparent',border:`1px solid ${C.border}`,borderRadius:3,color:C.muted,fontSize:9,letterSpacing:'0.1em',padding:'11px 12px',cursor:'pointer'}}>SKIP</button>
           </div>
         </div>
       );
