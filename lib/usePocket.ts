@@ -120,10 +120,10 @@ export function usePocket() {
 
   // Categorize: store the chosen account in category_account_id (NOT account_id,
   // which is the bank account and forms the other half of the double entry).
-  const categorizeTxn = useCallback(async (txnId: string, accountId: string, learn = true) => {
+  const categorizeTxn = useCallback(async (txnId: string, accountId: string, learn = true, includesHst = false) => {
     if (!orgId) return;
     await supabase.from('raw_transactions')
-      .update({ category_account_id: accountId, status: 'categorized' })
+      .update({ category_account_id: accountId, status: 'categorized', includes_hst: includesHst })
       .eq('id', txnId);
 
     if (learn) {
@@ -149,8 +149,8 @@ export function usePocket() {
   }, [refresh]);
 
   // Categorize + post in one move.
-  const categorizeAndPost = useCallback(async (txnId: string, accountId: string) => {
-    await categorizeTxn(txnId, accountId);
+  const categorizeAndPost = useCallback(async (txnId: string, accountId: string, includesHst = false) => {
+    await categorizeTxn(txnId, accountId, true, includesHst);
     const { error } = await supabase.rpc('post_transaction', { p_txn: txnId });
     refresh();
     return error?.message ?? null;

@@ -350,6 +350,7 @@ function InboxRoom({db}:{db:any}){
   const queue = db.unreviewed;
   const staged = db.categorized;
   const [pick,setPick] = useState<Record<string,string>>({});
+  const [hstPick,setHstPick] = useState<Record<string,boolean>>({});
   const [busy,setBusy] = useState(false);
   const [err,setErr]   = useState('');
   const [askOpen,setAskOpen] = useState(false);
@@ -551,10 +552,28 @@ function InboxRoom({db}:{db:any}){
             </div>
           )}
 
+          {Number(t.amount)>0&&(()=>{
+            const on=hstPick[t.id]||false;
+            const net=on?(Math.abs(Number(t.amount))/1.13):0;
+            const hst=on?(Math.abs(Number(t.amount))-net):0;
+            return(
+              <div onClick={()=>{sfxTap();setHstPick({...hstPick,[t.id]:!on});}}
+                style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',marginBottom:8,background:on?'#0d1005':'#0a0a0a',border:`1px solid ${on?C.green:C.border}`,borderRadius:3,cursor:'pointer'}}>
+                <div style={{width:20,height:20,borderRadius:3,border:`2px solid ${on?C.green:C.muted}`,background:on?C.green:'transparent',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                  {on&&<span style={{fontSize:11,color:'#0D0D0D',fontWeight:900}}>✓</span>}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{...mono,fontSize:11,color:on?C.green:C.text,fontWeight:700,letterSpacing:'0.05em'}}>THIS PAYMENT INCLUDES HST (13%)</div>
+                  {on&&<div style={{...mono,fontSize:10,color:C.muted,marginTop:3}}>Income {money(net)} + HST {money(hst)} → held for CRA</div>}
+                </div>
+              </div>
+            );
+          })()}
+
           <div style={{display:'flex',gap:8}}>
-            <button disabled={!chosen} onClick={()=>{sfxTap();db.categorizeTxn(t.id,chosen);}}
+            <button disabled={!chosen} onClick={()=>{sfxTap();db.categorizeTxn(t.id,chosen,true,hstPick[t.id]||false);}}
               style={{...mono,flex:1,background:chosen?'transparent':C.dim,border:`1px solid ${chosen?C.orange:C.dim}`,borderRadius:3,color:chosen?C.orange:C.muted,fontSize:10,letterSpacing:'0.15em',fontWeight:700,padding:'11px',cursor:chosen?'pointer':'not-allowed'}}>STAGE</button>
-            <button disabled={!chosen} onClick={async()=>{sfxCash();const e=await db.categorizeAndPost(t.id,chosen);if(e)setErr(e);}}
+            <button disabled={!chosen} onClick={async()=>{sfxCash();const e=await db.categorizeAndPost(t.id,chosen,hstPick[t.id]||false);if(e)setErr(e);}}
               style={{...mono,flex:1,background:chosen?C.orange:C.dim,border:'none',borderRadius:3,color:chosen?'#0D0D0D':C.muted,fontSize:10,letterSpacing:'0.15em',fontWeight:700,padding:'11px',cursor:chosen?'pointer':'not-allowed'}}>POST NOW</button>
             <button onClick={()=>{sfxTap();db.ignoreTxn(t.id);}}
               style={{...mono,background:'transparent',border:`1px solid ${C.border}`,borderRadius:3,color:C.muted,fontSize:9,letterSpacing:'0.1em',padding:'11px 12px',cursor:'pointer'}}>SKIP</button>
