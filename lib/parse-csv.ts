@@ -1,5 +1,5 @@
 // Dependency-free statement parser. Auto-detects delimiter (comma or tab),
-// skips preamble junk, and handles BMO's specific export layout plus generic CSVs.
+// skips preamble junk, and handles BMO, RBC, and generic CSV layouts.
 
 export type ParsedTxn = {
   date: string; // ISO yyyy-mm-dd
@@ -14,15 +14,10 @@ function splitLine(line: string, delim: string): string[] {
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
     if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
+      if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; }
+      else { inQuotes = !inQuotes; }
     } else if (ch === delim && !inQuotes) {
-      out.push(cur);
-      cur = "";
+      out.push(cur); cur = "";
     } else {
       cur += ch;
     }
@@ -43,7 +38,7 @@ function toISODate(raw: string): string | null {
   m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
 
-  // mm/dd/yyyy or dd/mm/yyyy (assume mm/dd for North American banks)
+  // m/d/yyyy or d/m/yyyy — assume m/d for North American banks (RBC, TD, Amex)
   m = s.match(/^(\d{1,2})[/\-](\d{1,2})[/\-](\d{2,4})$/);
   if (m) {
     let [, a, b, y] = m;
@@ -61,31 +56,32 @@ function toAmount(raw: string): number | null {
   let s = String(raw).trim().replace(/["']/g, "");
   if (!s) return null;
   let negative = false;
-  if (/^\(.*\)$/.test(s)) {
-    negative = true;
-    s = s.slice(1, -1);
-  }
-  if (s.startsWith("-")) {
-    negative = true;
-    s = s.slice(1);
-  }
+  if (/^\(.*\)$/.test(s)) { negative = true; s = s.slice(1, -1); }
+  if (s.startsWith("-")) { negative = true; s = s.slice(1); }
   s = s.replace(/[$,\s]/g, "");
+  if (s === "") return null;
   const n = parseFloat(s);
   if (isNaN(n)) return null;
   return negative ? -n : n;
 }
 
 function cleanDescription(raw: string): string {
-  return (raw || "")
-    .replace(/\[[A-Z]{2}\]/g, "") // strip BMO [DS] [CW] codes
-    .replace(/\s+/g, " ")
-    .trim() || "(no description)";
+  return (
+    (raw || "")
+      .replace(/\[[A-Z]{2}\]/g, "") // strip BMO [DS] [CW] codes
+      .replace(/\s+/g, " ")
+      .trim() || ""
+  );
 }
 
-// Detect delimiter by counting tabs vs commas across the first several lines.
+// Join multiple description columns (RBC has "Description 1" + "Description 2").
+function joinDescriptions(parts: string[]): string {
+  const cleaned = parts.map(cleanDescription).filter((p) => p.length > 0);
+  return cleaned.join(" — ") || "(no description)";
+}
+
 function detectDelimiter(lines: string[]): string {
-  let tabs = 0;
-  let commas = 0;
+  let tabs = 0, commas = 0;
   for (const l of lines.slice(0, 10)) {
     tabs += (l.match(/\t/g) || []).length;
     commas += (l.match(/,/g) || []).length;
@@ -100,37 +96,41 @@ export function parseStatementCsv(text: string): { rows: ParsedTxn[]; skipped: n
 
   const delim = detectDelimiter(nonEmpty);
 
-  // Find the header row: the first line that names date/amount/description-ish columns.
+  // Find the header row.
   let headerIdx = -1;
   for (let i = 0; i < nonEmpty.length; i++) {
     const low = nonEmpty[i].toLowerCase();
-    if (/date/.test(low) && (/amount|debit|credit|description/.test(low))) {
+    if (/date/.test(low) && /amount|debit|credit|description|cad|usd/.test(low)) {
       headerIdx = i;
       break;
     }
   }
 
   let dateIdx = -1;
-  let descIdx = -1;
+  const descIdxs: number[] = [];   // may be several (RBC Description 1 / 2)
   let amountIdx = -1;
   let debitIdx = -1;
   let creditIdx = -1;
+  const currencyIdxs: number[] = []; // CAD$ / USD$ style signed columns
   let dataLines: string[];
 
   if (headerIdx >= 0) {
     const header = splitLine(nonEmpty[headerIdx], delim).map((h) => h.toLowerCase());
     header.forEach((h, i) => {
       if (dateIdx < 0 && /date/.test(h)) dateIdx = i;
-      if (/desc|memo|detail|narration|payee/.test(h)) descIdx = i;
-      if (/amount|value/.test(h) && !/type/.test(h)) amountIdx = i;
+      if (/desc|memo|detail|narration|payee/.test(h)) descIdxs.push(i);
       if (/debit|withdrawal/.test(h)) debitIdx = i;
       if (/credit|deposit/.test(h)) creditIdx = i;
+      // RBC: "CAD$", "USD$" — signed single-column amounts, one per currency
+      if (/cad\$?|usd\$?|amount|value/.test(h) && !/type|number|account/.test(h)) {
+        if (/amount|value/.test(h) && amountIdx < 0) amountIdx = i;
+        else currencyIdxs.push(i);
+      }
     });
     dataLines = nonEmpty.slice(headerIdx + 1);
   } else {
-    // no header — assume date, description, amount by position
     dateIdx = 0;
-    descIdx = 1;
+    descIdxs.push(1);
     amountIdx = 2;
     dataLines = nonEmpty;
   }
@@ -141,36 +141,43 @@ export function parseStatementCsv(text: string): { rows: ParsedTxn[]; skipped: n
   for (const line of dataLines) {
     const cols = splitLine(line, delim);
     const date = toISODate(cols[dateIdx] ?? "");
-    if (!date) {
-      skipped++;
-      continue;
-    }
-    const description = cleanDescription(cols[descIdx] ?? "");
+    if (!date) { skipped++; continue; }
+
+    const descParts = descIdxs.length > 0
+      ? descIdxs.map((i) => cols[i] ?? "")
+      : [cols[1] ?? ""];
+    const description = joinDescriptions(descParts);
 
     let amount: number | null = null;
-    if (amountIdx >= 0) {
-      amount = toAmount(cols[amountIdx] ?? "");
-    } else if (debitIdx >= 0 || creditIdx >= 0) {
+
+    // 1) explicit single amount column
+    if (amountIdx >= 0) amount = toAmount(cols[amountIdx] ?? "");
+
+    // 2) RBC currency columns: take whichever of CAD$/USD$ has a value (prefer CAD)
+    if (amount === null && currencyIdxs.length > 0) {
+      for (const ci of currencyIdxs) {
+        const a = toAmount(cols[ci] ?? "");
+        if (a !== null) { amount = a; break; }
+      }
+    }
+
+    // 3) separate debit / credit columns
+    if (amount === null && (debitIdx >= 0 || creditIdx >= 0)) {
       const debit = debitIdx >= 0 ? toAmount(cols[debitIdx] ?? "") : null;
       const credit = creditIdx >= 0 ? toAmount(cols[creditIdx] ?? "") : null;
       if (debit) amount = -Math.abs(debit);
       else if (credit) amount = Math.abs(credit);
     }
+
+    // 4) fallback: last numeric column on the line
     if (amount === null) {
-      // fallback: last numeric column
       for (let c = cols.length - 1; c >= 0; c--) {
         const a = toAmount(cols[c]);
-        if (a !== null) {
-          amount = a;
-          break;
-        }
+        if (a !== null) { amount = a; break; }
       }
     }
 
-    if (amount === null) {
-      skipped++;
-      continue;
-    }
+    if (amount === null) { skipped++; continue; }
     rows.push({ date, description, amount });
   }
 
