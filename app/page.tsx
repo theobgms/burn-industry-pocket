@@ -493,10 +493,13 @@ function InboxRoom({db}:{db:any}){
       const chosen = pick[t.id] ?? (suggestedId || '');
       const learned = suggested && db.rules.some((r:any)=>r.account_id===suggestedId && t.normalized_vendor?.includes(r.match_pattern));
       return(
-        <div key={t.id} style={{...card,borderLeft:`3px solid ${C.orange}`}}>
+        <div key={t.id} style={{...card,borderLeft:`3px solid ${t.possible_duplicate?C.orange:C.orange}`,background:t.possible_duplicate?'#140a05':C.card}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,marginBottom:12}}>
             <div style={{flex:1}}>
-              <div style={{...mono,fontSize:9,letterSpacing:'0.2em',color:C.dim,marginBottom:5}}>{fmtDate(t.date)}</div>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5}}>
+                <span style={{...mono,fontSize:9,letterSpacing:'0.2em',color:C.dim}}>{fmtDate(t.date)}</span>
+                {t.possible_duplicate&&<span style={{...mono,fontSize:8,letterSpacing:'0.1em',color:'#0D0D0D',background:C.orange,fontWeight:700,padding:'2px 6px',borderRadius:2}}>POSSIBLE DUPLICATE</span>}
+              </div>
               <div style={{...mono,fontSize:13,color:C.text,lineHeight:1.4}}>{t.normalized_vendor||t.description}</div>
             </div>
             <div style={{...display,fontSize:20,color:Number(t.amount)<0?C.red:C.green,whiteSpace:'nowrap'}}>{money(t.amount)}</div>

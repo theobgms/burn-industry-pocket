@@ -57,8 +57,11 @@ export default function ImportUploader({ orgId, accounts }: { orgId: string; acc
 
     if (res.error) { setMsg(res.error); return; }
     const auto = (res as any).autoCategorized ?? 0;
-    const q = auto > 0 ? `?org=${orgId}&auto=${auto}` : `?org=${orgId}`;
-    router.push(`/import/${res.importId}${q}`);
+    const dup = (res as any).duplicates ?? 0;
+    const params = new URLSearchParams({ org: orgId });
+    if (auto > 0) params.set("auto", String(auto));
+    if (dup > 0) params.set("dup", String(dup));
+    router.push(`/import/${res.importId}?${params.toString()}`);
   }
 
   const label = { ...mono, display:"block", fontSize:9, letterSpacing:"0.3em", color:C.muted, marginBottom:8, textTransform:"uppercase" as const };

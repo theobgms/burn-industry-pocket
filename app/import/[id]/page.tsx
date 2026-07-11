@@ -14,10 +14,11 @@ const money0 = (n:number)=>`$${Math.round(Number(n||0)).toLocaleString('en-US')}
 
 export default async function ImportReviewPage({
   params, searchParams,
-}: { params: Promise<{ id: string }>; searchParams: Promise<{ org?: string; auto?: string }> }) {
+}: { params: Promise<{ id: string }>; searchParams: Promise<{ org?: string; auto?: string; dup?: string }> }) {
   const { id } = await params;
-  const { org: orgId, auto } = await searchParams;
+  const { org: orgId, auto, dup } = await searchParams;
   const autoCount = auto ? parseInt(auto, 10) : 0;
+  const dupCount = dup ? parseInt(dup, 10) : 0;
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -73,6 +74,17 @@ export default async function ImportReviewPage({
             </div>
             <div style={{ ...mono, fontSize:11, color:C.muted, marginTop:5, lineHeight:1.6 }}>
               Vendors you've categorized before were staged automatically. Review the pile before posting — nothing hits the ledger until you post it.
+            </div>
+          </div>
+        )}
+
+        {dupCount > 0 && (
+          <div style={{ background:'#140a05', border:`1px solid ${C.orange}44`, borderLeft:`3px solid ${C.orange}`, borderRadius:4, padding:'12px 14px', marginBottom:12 }}>
+            <div style={{ ...mono, fontSize:11, color:C.orange, fontWeight:700, letterSpacing:'0.1em' }}>
+              {dupCount} POSSIBLE DUPLICATE{dupCount===1?'':'S'} FLAGGED
+            </div>
+            <div style={{ ...mono, fontSize:11, color:C.muted, marginTop:5, lineHeight:1.6 }}>
+              These match transactions already in this account. They're marked in REVIEW and kept out of auto-staging — check each one and SKIP the real duplicates so they never hit the ledger.
             </div>
           </div>
         )}

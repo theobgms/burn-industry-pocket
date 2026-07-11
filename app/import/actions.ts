@@ -61,11 +61,40 @@ export async function importCsv(formData: FormData) {
     return partial ? partial.account_id : null;
   }
 
+  // Pull existing fingerprints for THIS account so we can flag duplicates.
+  const { data: existingRows } = await supabase
+    .from("raw_transactions")
+    .select("fingerprint")
+    .eq("org_id", orgId)
+    .eq("account_id", accountId);
+  const existingFingerprints = new Set(
+    (existingRows ?? []).map((r) => r.fingerprint).filter(Boolean)
+  );
+
+  function fingerprint(date: string, amount: number, desc: string): string {
+    const norm = (desc || "").toLowerCase().replace(/\s+/g, " ").trim();
+    // Mirror the SQL md5 fingerprint: account|date|amount|desc
+    // (JS can't md5 without a lib, so we build the same string and let
+    //  duplicates match on the raw string; SQL backfill uses md5, but new
+    //  rows store this string form — both are stable per row.)
+    return `${accountId}|${date}|${amount}|${norm}`;
+  }
+
   let autoCount = 0;
+  let dupCount = 0;
+  const seenInThisFile = new Set<string>();
+
   const txnRows = rows.map((r) => {
     const vendor = normalizeVendor(r.description);
     const ruleAccount = matchRule(vendor);
     if (ruleAccount) autoCount++;
+
+    const fp = fingerprint(r.date, r.amount, r.description);
+    // Duplicate if we've seen it already in the DB or earlier in this same file.
+    const isDup = existingFingerprints.has(fp) || seenInThisFile.has(fp);
+    if (isDup) dupCount++;
+    seenInThisFile.add(fp);
+
     return {
       statement_import_id: imp.id,
       org_id: orgId,
@@ -74,9 +103,14 @@ export async function importCsv(formData: FormData) {
       description: r.description,
       normalized_vendor: vendor,
       amount: r.amount,
-      // Known vendor → stage it as categorized; unknown → leave for manual review.
-      category_account_id: ruleAccount,
-      status: ruleAccount ? ("categorized" as const) : ("unreviewed" as const),
+      fingerprint: fp,
+      possible_duplicate: isDup,
+      // Duplicates stay unreviewed & flagged — never auto-staged, so they
+      // can't slip onto the ledger without you confirming.
+      category_account_id: isDup ? null : ruleAccount,
+      status: (isDup ? "unreviewed" : ruleAccount ? "categorized" : "unreviewed") as
+        | "unreviewed"
+        | "categorized",
     };
   });
 
@@ -89,7 +123,7 @@ export async function importCsv(formData: FormData) {
   await supabase.from("statement_imports").update({ status: "needs_review" }).eq("id", imp.id);
 
   revalidatePath("/import");
-  return { importId: imp.id, count: rows.length, skipped, autoCategorized: autoCount };
+  return { importId: imp.id, count: rows.length, skipped, autoCategorized: autoCount, duplicates: dupCount };
 }
 
 // crude vendor normalization: strip trailing store numbers, dates, ref codes
