@@ -352,6 +352,38 @@ function InboxRoom({db}:{db:any}){
   const [pick,setPick] = useState<Record<string,string>>({});
   const [busy,setBusy] = useState(false);
   const [err,setErr]   = useState('');
+  const [askOpen,setAskOpen] = useState(false);
+  const [askText,setAskText] = useState('');
+  const [asking,setAsking]   = useState(false);
+  const [answer,setAnswer]   = useState<any>(null);
+  const [helpFor,setHelpFor] = useState<string|null>(null);   // txn id being helped
+  const [helpBusy,setHelpBusy] = useState(false);
+  const [helpAns,setHelpAns] = useState<Record<string,any>>({});
+
+  async function askCategory(text:string){
+    if(!text.trim()||!db.orgId)return;
+    setAsking(true);setAnswer(null);
+    try{
+      const r=await fetch('/api/categorize',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({org_id:db.orgId,question:text.trim()})});
+      const d=await r.json();
+      if(d.error){setAnswer({error:d.error});}else{setAnswer(d);}
+    }catch{setAnswer({error:'Could not reach the helper — try again'});}
+    setAsking(false);
+  }
+
+  async function helpTxn(t:any){
+    if(!db.orgId)return;
+    setHelpFor(t.id);setHelpBusy(true);
+    try{
+      const r=await fetch('/api/categorize',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({org_id:db.orgId,question:t.normalized_vendor||t.description,amount:t.amount})});
+      const d=await r.json();
+      setHelpAns(h=>({...h,[t.id]:d}));
+      if(d.account_id) setPick(pk=>({...pk,[t.id]:d.account_id}));
+    }catch{setHelpAns(h=>({...h,[t.id]:{error:'Could not reach the helper'}}));}
+    setHelpBusy(false);setHelpFor(null);
+  }
 
   const acctName=(id:string)=>{const a=db.accounts.find((x:any)=>x.id===id);return a?`${a.code} — ${a.name}`:'';};
   const stagedTotal = staged.reduce((n:number,t:any)=>n+Math.abs(Number(t.amount)),0);
@@ -379,6 +411,36 @@ function InboxRoom({db}:{db:any}){
       <Link href={importHref} style={{...mono,display:'block',marginTop:14,textAlign:'center',background:'transparent',border:`1px solid ${C.purple}`,borderRadius:3,color:C.purple,fontSize:10,letterSpacing:'0.2em',fontWeight:700,padding:'11px',textDecoration:'none'}}>
         ⬆ IMPORT A STATEMENT
       </Link>
+    </div>
+
+    {/* CATEGORY HELPER */}
+    <div style={{...card,borderLeft:`3px solid ${C.purple}`}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div style={{...lbl,color:C.purple,marginBottom:0}}>NOT SURE WHERE IT GOES?</div>
+        <button onClick={()=>{sfxTap();setAskOpen((o:boolean)=>!o);}}
+          style={{...mono,background:askOpen?C.purple:'transparent',border:`1px solid ${C.purple}`,borderRadius:3,color:askOpen?'#0D0D0D':C.purple,fontSize:9,letterSpacing:'0.12em',fontWeight:700,padding:'6px 12px',cursor:'pointer'}}>
+          {askOpen?'✕ CLOSE':'? ASK'}
+        </button>
+      </div>
+      {askOpen&&(
+        <div style={{marginTop:12}}>
+          <textarea value={askText} onChange={e=>setAskText(e.target.value)} rows={3}
+            placeholder="e.g. I got an e-transfer for rent on the studio I hold the lease for — what category?"
+            style={{...mono,width:'100%',background:'#0a0a0a',border:`1px solid ${C.border}`,borderRadius:3,padding:'10px 12px',fontSize:13,color:C.text,outline:'none',resize:'vertical' as const,lineHeight:1.6,marginBottom:8}}/>
+          <button onClick={()=>{sfxTap();askCategory(askText);}} disabled={asking}
+            style={{...mono,width:'100%',background:asking?C.dim:C.purple,border:'none',borderRadius:3,color:asking?C.muted:'#0D0D0D',fontSize:10,letterSpacing:'0.2em',fontWeight:700,padding:'11px',cursor:asking?'wait':'pointer'}}>
+            {asking?'THINKING…':'ASK CLAUDE →'}
+          </button>
+          {answer&&!answer.error&&(
+            <div style={{marginTop:12,background:'#0d0a14',border:`1px solid ${C.purple}44`,borderRadius:4,padding:'14px'}}>
+              <div style={{...mono,fontSize:9,letterSpacing:'0.2em',color:C.purple,marginBottom:6}}>ANSWER</div>
+              <div style={{...display,fontSize:18,color:C.text,lineHeight:1.1}}>{answer.code} — {answer.name}</div>
+              <div style={{...mono,fontSize:12,color:C.muted,lineHeight:1.6,marginTop:8}}>{answer.reason}</div>
+            </div>
+          )}
+          {answer?.error&&<div style={{...mono,fontSize:11,color:C.red,marginTop:10,lineHeight:1.6}}>{answer.error}</div>}
+        </div>
+      )}
     </div>
 
     {/* STAGED — ready to post */}
@@ -438,11 +500,26 @@ function InboxRoom({db}:{db:any}){
             </div>
           )}
 
-          <select value={chosen} onChange={e=>setPick({...pick,[t.id]:e.target.value})}
-            style={{...mono,width:'100%',background:'#0a0a0a',border:`1px solid ${C.border}`,borderRadius:3,padding:'10px 12px',fontSize:12,color:C.text,marginBottom:8,cursor:'pointer'}}>
-            <option value="">Choose an account…</option>
-            {db.accounts.map((a:any)=><option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-          </select>
+          {helpAns[t.id]&&!helpAns[t.id].error&&(
+            <div style={{background:'#0d0a14',border:`1px solid ${C.purple}44`,borderRadius:4,padding:'11px 12px',marginBottom:8}}>
+              <div style={{...mono,fontSize:9,letterSpacing:'0.2em',color:C.purple,marginBottom:4}}>CLAUDE SAYS → {helpAns[t.id].code} {helpAns[t.id].name}</div>
+              <div style={{...mono,fontSize:11,color:C.muted,lineHeight:1.6}}>{helpAns[t.id].reason}</div>
+            </div>
+          )}
+          {helpAns[t.id]?.error&&<div style={{...mono,fontSize:11,color:C.red,marginBottom:8}}>{helpAns[t.id].error}</div>}
+
+          <div style={{display:'flex',gap:8,marginBottom:8}}>
+            <select value={chosen} onChange={e=>setPick({...pick,[t.id]:e.target.value})}
+              style={{...mono,flex:1,background:'#0a0a0a',border:`1px solid ${C.border}`,borderRadius:3,padding:'10px 12px',fontSize:12,color:C.text,cursor:'pointer'}}>
+              <option value="">Choose an account…</option>
+              {db.accounts.map((a:any)=><option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+            </select>
+            <button onClick={()=>{sfxTap();helpTxn(t);}} disabled={helpBusy&&helpFor===t.id}
+              title="Ask Claude where this goes"
+              style={{...mono,background:'transparent',border:`1px solid ${C.purple}`,borderRadius:3,color:C.purple,fontSize:9,letterSpacing:'0.1em',fontWeight:700,padding:'0 14px',cursor:'pointer',whiteSpace:'nowrap'}}>
+              {helpBusy&&helpFor===t.id?'…':'? ASK'}
+            </button>
+          </div>
 
           <div style={{display:'flex',gap:8}}>
             <button disabled={!chosen} onClick={()=>{sfxTap();db.categorizeTxn(t.id,chosen);}}

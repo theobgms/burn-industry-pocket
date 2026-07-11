@@ -56,7 +56,9 @@ export default function ImportUploader({ orgId, accounts }: { orgId: string; acc
     setBusy(false);
 
     if (res.error) { setMsg(res.error); return; }
-    router.push(`/import/${res.importId}?org=${orgId}`);
+    const auto = (res as any).autoCategorized ?? 0;
+    const q = auto > 0 ? `?org=${orgId}&auto=${auto}` : `?org=${orgId}`;
+    router.push(`/import/${res.importId}${q}`);
   }
 
   const label = { ...mono, display:"block", fontSize:9, letterSpacing:"0.3em", color:C.muted, marginBottom:8, textTransform:"uppercase" as const };

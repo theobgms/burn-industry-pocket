@@ -14,9 +14,10 @@ const money0 = (n:number)=>`$${Math.round(Number(n||0)).toLocaleString('en-US')}
 
 export default async function ImportReviewPage({
   params, searchParams,
-}: { params: Promise<{ id: string }>; searchParams: Promise<{ org?: string }> }) {
+}: { params: Promise<{ id: string }>; searchParams: Promise<{ org?: string; auto?: string }> }) {
   const { id } = await params;
-  const { org: orgId } = await searchParams;
+  const { org: orgId, auto } = await searchParams;
+  const autoCount = auto ? parseInt(auto, 10) : 0;
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -64,6 +65,17 @@ export default async function ImportReviewPage({
           <Stat label="STAGED"    value={String(categorized)} color={categorized?C.gold:C.muted} />
           <Stat label="POSTED"    value={String(posted)}      color={posted?C.green:C.muted} />
         </div>
+
+        {autoCount > 0 && (
+          <div style={{ background:'#12100a', border:`1px solid ${C.gold}44`, borderLeft:`3px solid ${C.gold}`, borderRadius:4, padding:'12px 14px', marginBottom:12 }}>
+            <div style={{ ...mono, fontSize:11, color:C.gold, fontWeight:700, letterSpacing:'0.1em' }}>
+              {autoCount} AUTO-CATEGORIZED FROM PAST RULES
+            </div>
+            <div style={{ ...mono, fontSize:11, color:C.muted, marginTop:5, lineHeight:1.6 }}>
+              Vendors you've categorized before were staged automatically. Review the pile before posting — nothing hits the ledger until you post it.
+            </div>
+          </div>
+        )}
 
         <PostPanel importId={id} orgId={orgId} categorized={categorized} unreviewed={unreviewed} />
 
