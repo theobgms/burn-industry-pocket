@@ -359,6 +359,8 @@ function InboxRoom({db}:{db:any}){
   const [helpFor,setHelpFor] = useState<string|null>(null);   // txn id being helped
   const [helpBusy,setHelpBusy] = useState(false);
   const [helpAns,setHelpAns] = useState<Record<string,any>>({});
+  const [ctxOpen,setCtxOpen] = useState<string|null>(null);   // txn id with context box open
+  const [ctxText,setCtxText] = useState<Record<string,string>>({});
 
   async function askCategory(text:string){
     if(!text.trim()||!db.orgId)return;
@@ -372,12 +374,18 @@ function InboxRoom({db}:{db:any}){
     setAsking(false);
   }
 
-  async function helpTxn(t:any){
+  async function helpTxn(t:any, extraContext?:string){
     if(!db.orgId)return;
     setHelpFor(t.id);setHelpBusy(true);
+    // Build a richer question: bank description + amount + whatever the user typed.
+    const base = t.normalized_vendor||t.description;
+    const dir = Number(t.amount)<0 ? 'money going OUT (a payment I sent)' : 'money coming IN (a payment I received)';
+    const question = extraContext?.trim()
+      ? `Bank description: "${base}". This is ${dir}. Additional context from me: ${extraContext.trim()}`
+      : `Bank description: "${base}". This is ${dir}.`;
     try{
       const r=await fetch('/api/categorize',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({org_id:db.orgId,question:t.normalized_vendor||t.description,amount:t.amount})});
+        body:JSON.stringify({org_id:db.orgId,question,amount:t.amount})});
       const d=await r.json();
       setHelpAns(h=>({...h,[t.id]:d}));
       if(d.account_id) setPick(pk=>({...pk,[t.id]:d.account_id}));
@@ -514,12 +522,34 @@ function InboxRoom({db}:{db:any}){
               <option value="">Choose an account…</option>
               {db.accounts.map((a:any)=><option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
             </select>
-            <button onClick={()=>{sfxTap();helpTxn(t);}} disabled={helpBusy&&helpFor===t.id}
-              title="Ask Claude where this goes"
-              style={{...mono,background:'transparent',border:`1px solid ${C.purple}`,borderRadius:3,color:C.purple,fontSize:9,letterSpacing:'0.1em',fontWeight:700,padding:'0 14px',cursor:'pointer',whiteSpace:'nowrap'}}>
-              {helpBusy&&helpFor===t.id?'…':'? ASK'}
+            <button onClick={()=>{sfxTap();setCtxOpen(ctxOpen===t.id?null:t.id);}}
+              title="Ask Claude — add context if the bank description isn't clear"
+              style={{...mono,background:ctxOpen===t.id?C.purple:'transparent',border:`1px solid ${C.purple}`,borderRadius:3,color:ctxOpen===t.id?'#0D0D0D':C.purple,fontSize:9,letterSpacing:'0.1em',fontWeight:700,padding:'0 14px',cursor:'pointer',whiteSpace:'nowrap'}}>
+              ? ASK
             </button>
           </div>
+
+          {ctxOpen===t.id&&(
+            <div style={{background:'#0d0a14',border:`1px solid ${C.purple}44`,borderRadius:4,padding:'12px',marginBottom:8}}>
+              <div style={{...mono,fontSize:10,color:C.muted,lineHeight:1.6,marginBottom:8}}>
+                The bank only says "{t.normalized_vendor||t.description}". Tell Claude what it was actually for — then it can categorize it right.
+              </div>
+              <input value={ctxText[t.id]||''} onChange={e=>setCtxText({...ctxText,[t.id]:e.target.value})}
+                onKeyDown={e=>{if(e.key==='Enter'){sfxTap();helpTxn(t,ctxText[t.id]);}}}
+                placeholder="e.g. rent I received for the studio I lease"
+                style={{...mono,width:'100%',background:'#0a0a0a',border:`1px solid ${C.border}`,borderRadius:3,padding:'9px 11px',fontSize:12,color:C.text,outline:'none',marginBottom:8}}/>
+              <div style={{display:'flex',gap:8}}>
+                <button onClick={()=>{sfxTap();helpTxn(t,ctxText[t.id]);}} disabled={helpBusy&&helpFor===t.id}
+                  style={{...mono,flex:1,background:C.purple,border:'none',borderRadius:3,color:'#0D0D0D',fontSize:9,letterSpacing:'0.15em',fontWeight:700,padding:'9px',cursor:'pointer'}}>
+                  {helpBusy&&helpFor===t.id?'THINKING…':'ASK WITH THIS CONTEXT →'}
+                </button>
+                <button onClick={()=>{sfxTap();helpTxn(t);}} disabled={helpBusy&&helpFor===t.id}
+                  style={{...mono,background:'transparent',border:`1px solid ${C.border}`,borderRadius:3,color:C.muted,fontSize:9,letterSpacing:'0.1em',padding:'9px 12px',cursor:'pointer',whiteSpace:'nowrap'}}>
+                  NO CONTEXT
+                </button>
+              </div>
+            </div>
+          )}
 
           <div style={{display:'flex',gap:8}}>
             <button disabled={!chosen} onClick={()=>{sfxTap();db.categorizeTxn(t.id,chosen);}}

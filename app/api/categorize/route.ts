@@ -33,9 +33,11 @@ ${list}
 
 Rules:
 - Choose the single best account by its code.
+- If the user gives you "Additional context", TRUST IT over the raw bank description. The bank text is often generic (e.g. "e-transfer sent") and the user's context tells you what the money was actually for.
 - Think about direction: money RECEIVED is usually income; money SPENT is an expense or cost of goods.
-- Example: rent received from a sub-tenant on a studio the user leases is rental INCOME, not an expense.
-- If genuinely ambiguous, pick the closest and say why briefly.
+- Example: rent RECEIVED from a sub-tenant on a studio the user leases is rental INCOME (a specific rent/rental income account if one exists), NOT a generic "other income".
+- Avoid vague catch-all accounts like "Other Income" or "Miscellaneous" unless nothing else fits at all. Prefer the most specific matching account.
+- If genuinely ambiguous even with context, pick the closest specific account and explain the assumption.
 
 Respond ONLY with JSON, no markdown, no backticks:
 {"code":"<account code>","name":"<account name>","reason":"<one sentence, plain English>"}
